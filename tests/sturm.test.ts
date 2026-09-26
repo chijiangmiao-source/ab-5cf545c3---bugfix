@@ -1,8 +1,11 @@
 /**
- * 核心算法单元测试。verify 服务要求的三个场景：
+ * 核心算法单元测试。verify 服务要求的场景：
  *   1) 两个实根  2) 无实根  3) 端点为根拒绝
+ *   4) 切触后穿越：(2x−3)^2·(x−4) 在 (0, 5)——偶重根只计一个不同实根，
+ *      但同样必须给出有理隔离区间与 Sturm 变号证据
  * 另覆盖：首项为零、系数格式错误、次数越界、区间次序、
- * 重根（非平方自由）、二分恰好命中根、隔离区间互不相交与 Sturm 证据。
+ * 重根（非平方自由）、二分恰好命中根、相邻但不同的实根不合并、
+ * 隔离区间互不相交与 Sturm 证据可复算。
  */
 import { describe, expect, it } from 'vitest';
 import { runIsolation } from '../src/lib/api';
@@ -10,6 +13,7 @@ import * as P from '../src/lib/poly';
 import * as R from '../src/lib/rational';
 import {
   buildSturmChain,
+  evalChain,
   IsoError,
   isolateRoots,
   variations,
@@ -61,6 +65,75 @@ describe('场景一：两个实根 (x−1)(x−2) 在 (0, 5)', () => {
       expect(iv.signsL).toHaveLength(res.chain.length);
       expect(iv.signsR).toHaveLength(res.chain.length);
     }
+  });
+});
+
+describe('切触后穿越：(2x−3)^2·(x−4) 在 (0, 5)', () => {
+  // p(x) = 4x^3 − 28x^2 + 57x − 36 = (2x−3)^2 (x−4)：
+  // 在 x = 3/2 处与零线相切（二重根，无符号变化），在 x = 4 处穿越零线。
+  const CUBIC = [-36n, 57n, -28n, 4n];
+  const p = P.fromBigInts(CUBIC);
+  const tangent = R.rat(3n, 2n);
+  const crossing = R.fromBigInt(4n);
+  const res = isolateRoots(CUBIC, 0n, 5n);
+
+  it('前置确认：3/2 为切触偶重根，4 为穿越单根', () => {
+    expect(R.isZero(P.evalRat(p, tangent))).toBe(true);
+    // 偶重性：导数在该点亦为零，曲线与零线相切而不穿越
+    expect(R.isZero(P.evalRat(P.derivative(p), tangent))).toBe(true);
+    expect(R.isZero(P.evalRat(p, crossing))).toBe(true);
+    expect(R.isZero(P.evalRat(P.derivative(p), crossing))).toBe(false);
+  });
+
+  it('不同实根数为 2：切触根只计一次且不被遗漏', () => {
+    expect(res.totalRoots).toBe(2);
+    expect(res.vA - res.vB).toBe(2);
+  });
+
+  it('根数、区间清单与证据一致：两段升序且互不相交的隔离区间', () => {
+    expect(res.intervals).toHaveLength(res.totalRoots);
+    const [u, v] = res.intervals;
+    expect(R.cmp(u.l, u.r)).toBeLessThan(0);
+    expect(R.cmp(v.l, v.r)).toBeLessThan(0);
+    // 数值升序且端点严格分离
+    expect(R.cmp(u.r, v.l)).toBeLessThan(0);
+  });
+
+  it('切触根 3/2 与穿越根 4 各落在一段有理区间内', () => {
+    const [u, v] = res.intervals;
+    expect(R.cmp(u.l, tangent)).toBeLessThan(0);
+    expect(R.cmp(tangent, u.r)).toBeLessThan(0);
+    expect(R.cmp(v.l, crossing)).toBeLessThan(0);
+    expect(R.cmp(crossing, v.r)).toBeLessThan(0);
+  });
+
+  it('每段均附 V(l) − V(r) = 1 的 Sturm 证据，且可独立复算', () => {
+    for (const iv of res.intervals) {
+      expect(iv.vL - iv.vR).toBe(1);
+      expect(iv.signsL).toHaveLength(res.chain.length);
+      expect(iv.signsR).toHaveLength(res.chain.length);
+      // 端点均非根（开区间隔离的前提），符号序列与记录的 V 值自洽
+      expect(P.signAt(p, iv.l)).not.toBe(0);
+      expect(P.signAt(p, iv.r)).not.toBe(0);
+      expect(variations(iv.signsL)).toBe(iv.vL);
+      expect(variations(iv.signsR)).toBe(iv.vR);
+      // 用同一条链在端点处独立重算，变号数必须与记录一致
+      expect(evalChain(res.chain, iv.l).variations).toBe(iv.vL);
+      expect(evalChain(res.chain, iv.r).variations).toBe(iv.vR);
+    }
+  });
+
+  it('runIsolation（Worker 计算路径）同样给出两段区间与一致证据', () => {
+    const dto = runIsolation('4, -28, 57, -36', '0', '5');
+    expect(dto.totalRoots).toBe(2);
+    expect(dto.intervals).toHaveLength(2);
+    const [u, v] = dto.intervals;
+    expect(Number(u.lDec)).toBeLessThan(1.5);
+    expect(Number(u.rDec)).toBeGreaterThan(1.5);
+    expect(Number(v.lDec)).toBeLessThan(4);
+    expect(Number(v.rDec)).toBeGreaterThan(4);
+    for (const iv of dto.intervals) expect(iv.vL - iv.vR).toBe(1);
+    expect(() => JSON.stringify(dto)).not.toThrow();
   });
 });
 

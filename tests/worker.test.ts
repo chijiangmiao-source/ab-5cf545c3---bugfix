@@ -44,6 +44,36 @@ describe('Worker 消息处理', () => {
     }
   });
 
+  it('切触后穿越的三次曲线返回两段区间且逐段证据一致', async () => {
+    const selfMock = await setupWorker();
+    // (2x−3)^2·(x−4) = 4x^3 − 28x^2 + 57x − 36：x=3/2 切触零线，x=4 穿越零线
+    selfMock.onmessage!({
+      data: {
+        type: 'isolate',
+        requestId: 11,
+        coeffs: '4, -28, 57, -36',
+        a: '0',
+        b: '5',
+      },
+    });
+    const msg = selfMock.postMessage.mock.calls[0][0] as WorkerResponse;
+    expect(msg.type).toBe('result');
+    expect(msg.requestId).toBe(11);
+    if (msg.type === 'result') {
+      expect(msg.result.totalRoots).toBe(2);
+      // 根数、区间清单与逐段证据必须相互一致
+      expect(msg.result.intervals).toHaveLength(2);
+      const [u, v] = msg.result.intervals;
+      expect(Number(u.lDec)).toBeLessThan(1.5);
+      expect(Number(u.rDec)).toBeGreaterThan(1.5);
+      expect(Number(v.lDec)).toBeLessThan(4);
+      expect(Number(v.rDec)).toBeGreaterThan(4);
+      for (const iv of msg.result.intervals) {
+        expect(iv.vL - iv.vR).toBe(1);
+      }
+    }
+  });
+
   it('端点为根返回 error 消息且 code 为 ENDPOINT_ROOT', async () => {
     const selfMock = await setupWorker();
     selfMock.onmessage!({

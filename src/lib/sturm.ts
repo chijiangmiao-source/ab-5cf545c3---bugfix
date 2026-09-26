@@ -178,37 +178,31 @@ export const isolateRoots = (
   };
 
   // 二分隔离：栈中每项 (l, r, k) 满足 V(l) − V(r) = k，即 (l, r) 内恰有 k 个不同实根。
+  // k = 0 的段直接丢弃；k = 1 的段即为一个隔离区间；k ≥ 2 的段在非根分割点
+  // 处二分，按 V 值差递归拆分，直至每段恰含一个根。偶重根（曲线与零线相切
+  // 但不穿越）同样使 V 值恰好下降 1，因此与穿越根一样被隔离，不会遗漏。
   const units: { l: R.Rat; r: R.Rat }[] = [];
-  const sampleDepth = Math.max(4, Math.min(18, P.degree(p) + 4));
-  const sampleCount = 1 << sampleDepth;
-  const sampleDenominator = BigInt(sampleCount + 1);
-  let previous = ra;
-  let previousSign = P.signAt(p, previous);
-
-  for (let i = 1; i <= sampleCount; i++) {
-    const fraction = R.rat(BigInt(i), sampleDenominator);
-    const current = i === sampleCount
-      ? rb
-      : R.add(ra, R.mul(R.sub(rb, ra), fraction));
-    const currentSign = P.signAt(p, current);
-
-    if (previousSign !== 0 && currentSign !== 0 && previousSign !== currentSign) {
-      let l = previous;
-      let r = current;
-      for (let step = 0; step < 12; step++) {
-        const x = findSplit(l, r);
-        const xSign = P.signAt(p, x);
-        if (xSign === 0 || xSign === previousSign) {
-          l = x;
-        } else {
-          r = x;
-        }
-      }
-      units.push({ l, r });
+  const stack: { l: R.Rat; r: R.Rat; k: number }[] = [
+    { l: ra, r: rb, k: total },
+  ];
+  let splitSteps = 0;
+  while (stack.length > 0) {
+    if (++splitSteps > MAX_REFINE_STEPS) {
+      throw new IsoError('INTERNAL', '二分隔离超出迭代上限');
     }
-
-    previous = current;
-    previousSign = currentSign;
+    const top = stack.pop();
+    if (!top) break;
+    const { l, r, k } = top;
+    if (k === 0) continue;
+    if (k === 1) {
+      units.push({ l, r });
+      continue;
+    }
+    const m = findSplit(l, r);
+    const kLeft = evalAt(l).variations - evalAt(m).variations;
+    const kRight = evalAt(m).variations - evalAt(r).variations;
+    stack.push({ l, r: m, k: kLeft });
+    stack.push({ l: m, r, k: kRight });
   }
 
   // 按数值升序排列。
