@@ -1,8 +1,9 @@
 /**
  * 核心算法单元测试。verify 服务要求的三个场景：
  *   1) 两个实根  2) 无实根  3) 端点为根拒绝
- * 另覆盖：首项为零、系数格式错误、次数越界、区间次序、
- * 重根（非平方自由）、二分恰好命中根、隔离区间互不相交与 Sturm 证据。
+ * 另覆盖：切触后穿越（偶重根不遗漏）、首项为零、系数格式错误、
+ * 次数越界、区间次序、重根（非平方自由）、二分恰好命中根、
+ * 隔离区间互不相交与 Sturm 证据。
  */
 import { describe, expect, it } from 'vitest';
 import { runIsolation } from '../src/lib/api';
@@ -61,6 +62,57 @@ describe('场景一：两个实根 (x−1)(x−2) 在 (0, 5)', () => {
       expect(iv.signsL).toHaveLength(res.chain.length);
       expect(iv.signsR).toHaveLength(res.chain.length);
     }
+  });
+});
+
+describe('切触后穿越：(2x−3)^2·(x−4) 在 (0, 5)', () => {
+  // (2x−3)^2·(x−4) = 4x^3 − 28x^2 + 57x − 36，升幂系数。
+  // 曲线在 x = 3/2 处与零线相切（二重根，不变号），在 x = 4 处穿越零线。
+  const TANGENT_CUBIC = [-36n, 57n, -28n, 4n];
+  const res = isolateRoots(TANGENT_CUBIC, 0n, 5n);
+
+  it('不同实根数为 2：切触根按一个不同实根计数，不得遗漏', () => {
+    expect(res.totalRoots).toBe(2);
+    expect(res.vA - res.vB).toBe(2);
+  });
+
+  it('给出两个互不相交、严格分离且升序的隔离区间', () => {
+    expect(res.intervals).toHaveLength(2);
+    const [u, v] = res.intervals;
+    expect(R.cmp(u.l, u.r)).toBeLessThan(0);
+    expect(R.cmp(v.l, v.r)).toBeLessThan(0);
+    // 升序且互不相交：右端点严格小于下一区间左端点
+    expect(R.cmp(u.r, v.l)).toBeLessThan(0);
+  });
+
+  it('切触根 3/2 与穿越根 4 分别落在两段区间内', () => {
+    const [u, v] = res.intervals;
+    const tangent = R.rat(3n, 2n);
+    expect(R.cmp(u.l, tangent)).toBeLessThan(0);
+    expect(R.cmp(tangent, u.r)).toBeLessThan(0);
+    expect(R.cmp(v.l, R.fromBigInt(4n))).toBeLessThan(0);
+    expect(R.cmp(R.fromBigInt(4n), v.r)).toBeLessThan(0);
+  });
+
+  it('每段均附 V(l) − V(r) = 1 的 Sturm 证据，根数、区间与证据可相互复算', () => {
+    let sum = 0;
+    for (const iv of res.intervals) {
+      expect(iv.vL - iv.vR).toBe(1);
+      expect(iv.signsL).toHaveLength(res.chain.length);
+      expect(iv.signsR).toHaveLength(res.chain.length);
+      sum += iv.vL - iv.vR;
+    }
+    // 区间条数等于不同实根数，逐段变号差之和等于整体 V(a) − V(b)
+    expect(res.intervals).toHaveLength(res.totalRoots);
+    expect(sum).toBe(res.vA - res.vB);
+  });
+
+  it('runIsolation（页面计算路径）同样给出两段区间与逐段证据', () => {
+    const dto = runIsolation('4, -28, 57, -36', '0', '5');
+    expect(dto.totalRoots).toBe(2);
+    expect(dto.intervals).toHaveLength(2);
+    for (const iv of dto.intervals) expect(iv.vL - iv.vR).toBe(1);
+    expect(() => JSON.stringify(dto)).not.toThrow();
   });
 });
 

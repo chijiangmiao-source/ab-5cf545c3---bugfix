@@ -177,38 +177,28 @@ export const isolateRoots = (
     throw new IsoError('INTERNAL', '未能在区间内找到非根分割点');
   };
 
-  // 二分隔离：栈中每项 (l, r, k) 满足 V(l) − V(r) = k，即 (l, r) 内恰有 k 个不同实根。
+  // 二分隔离：以 Sturm 变号数之差递归拆分区间。栈中每项 (l, r, k)
+  // 满足 V(l) − V(r) = k，即开区间 (l, r) 内恰有 k 个不同实根；
+  // k = 1 时即得一个隔离区间。偶重重根（曲线切触零线处）不改变
+  // 函数符号，但会被 V 值差计入，因此同样被隔离，不会遗漏。
   const units: { l: R.Rat; r: R.Rat }[] = [];
-  const sampleDepth = Math.max(4, Math.min(18, P.degree(p) + 4));
-  const sampleCount = 1 << sampleDepth;
-  const sampleDenominator = BigInt(sampleCount + 1);
-  let previous = ra;
-  let previousSign = P.signAt(p, previous);
-
-  for (let i = 1; i <= sampleCount; i++) {
-    const fraction = R.rat(BigInt(i), sampleDenominator);
-    const current = i === sampleCount
-      ? rb
-      : R.add(ra, R.mul(R.sub(rb, ra), fraction));
-    const currentSign = P.signAt(p, current);
-
-    if (previousSign !== 0 && currentSign !== 0 && previousSign !== currentSign) {
-      let l = previous;
-      let r = current;
-      for (let step = 0; step < 12; step++) {
-        const x = findSplit(l, r);
-        const xSign = P.signAt(p, x);
-        if (xSign === 0 || xSign === previousSign) {
-          l = x;
-        } else {
-          r = x;
-        }
-      }
-      units.push({ l, r });
+  const stack: { l: R.Rat; r: R.Rat; k: number }[] = [];
+  if (total > 0) stack.push({ l: ra, r: rb, k: total });
+  let splitSteps = 0;
+  while (stack.length > 0) {
+    if (++splitSteps > MAX_REFINE_STEPS) {
+      throw new IsoError('INTERNAL', '二分隔离超出迭代上限');
     }
-
-    previous = current;
-    previousSign = currentSign;
+    const { l, r, k } = stack.pop()!;
+    if (k === 1) {
+      units.push({ l, r });
+      continue;
+    }
+    // 分割点取非根有理点：两侧 V 值差之和恰为 k，任何根都不会被吞掉。
+    const x = findSplit(l, r);
+    const kLeft = evalAt(l).variations - evalAt(x).variations;
+    if (kLeft > 0) stack.push({ l, r: x, k: kLeft });
+    if (k - kLeft > 0) stack.push({ l: x, r, k: k - kLeft });
   }
 
   // 按数值升序排列。

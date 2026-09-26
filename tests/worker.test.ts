@@ -44,6 +44,24 @@ describe('Worker 消息处理', () => {
     }
   });
 
+  it('切触后穿越曲线返回两个不同实根与两段隔离区间', async () => {
+    const selfMock = await setupWorker();
+    selfMock.onmessage!({
+      data: { type: 'isolate', requestId: 11, coeffs: '4, -28, 57, -36', a: '0', b: '5' },
+    });
+    const msg = selfMock.postMessage.mock.calls[0][0] as WorkerResponse;
+    expect(msg.type).toBe('result');
+    expect(msg.requestId).toBe(11);
+    if (msg.type === 'result') {
+      // x = 3/2 处切触零线（二重根），x = 4 处穿越：两个不同实根都要隔离
+      expect(msg.result.totalRoots).toBe(2);
+      expect(msg.result.intervals).toHaveLength(2);
+      for (const iv of msg.result.intervals) {
+        expect(iv.vL - iv.vR).toBe(1);
+      }
+    }
+  });
+
   it('端点为根返回 error 消息且 code 为 ENDPOINT_ROOT', async () => {
     const selfMock = await setupWorker();
     selfMock.onmessage!({
